@@ -27,31 +27,31 @@ def enviar_telegram(mensagem: str):
     resposta.raise_for_status()
 
 def consultar_euro():
-    """Tenta buscar na AwesomeAPI; se tomar erro 429 do IP do GitHub, usa APIs globais de reserva."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36"
-    }
+    """Consulta APIs internacionais liberadas para o GitHub Actions."""
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    # 1ª Tentativa: AwesomeAPI (Tempo real + variação do dia)
+    # 1ª Opção: Yahoo Finance API (Tempo real do mercado financeiro global, sem bloqueio)
     try:
-        url = "https://economia.awesomeapi.com.br/last/EUR-BRL"
-        resp = requests.get(url, headers=headers, timeout=10)
+        url_yahoo = "https://query1.finance.yahoo.com/v8/finance/chart/EURBRL=X?interval=1m&range=1d"
+        resp = requests.get(url_yahoo, headers=headers, timeout=10)
         if resp.status_code == 200:
-            dados = resp.json()["EURBRL"]
+            meta = resp.json()["chart"]["result"][0]["meta"]
+            cotacao = float(meta["regularMarketPrice"])
+            fechamento_anterior = float(meta.get("chartPreviousClose", cotacao))
+            variacao = ((cotacao - fechamento_anterior) / fechamento_anterior) * 100
             return {
-                "comercial": float(dados["bid"]),
-                "minima": float(dados["low"]),
-                "variacao": float(dados["pctChange"]),
-                "fonte": "AwesomeAPI"
+                "comercial": cotacao,
+                "minima": float(meta.get("regularMarketDayLow", cotacao)),
+                "variacao": variacao,
+                "fonte": "Yahoo Finance (Tempo Real)"
             }
-        print(f"Aviso: AwesomeAPI retornou status {resp.status_code}. Acionando fonte de reserva...")
     except Exception as e:
-        print(f"Aviso na AwesomeAPI: {e}. Acionando fonte de reserva...")
+        print(f"Aviso no Yahoo Finance: {e}. Tentando 2ª fonte...")
 
-    # 2ª Tentativa: Open ExchangeRate API (Não bloqueia IP do GitHub Actions)
+    # 2ª Opção: Open ExchangeRate API
     try:
-        url_backup1 = "https://open.er-api.com/v6/latest/EUR"
-        resp = requests.get(url_backup1, headers=headers, timeout=10)
+        url_er = "https://open.er-api.com/v6/latest/EUR"
+        resp = requests.get(url_er, headers=headers, timeout=10)
         if resp.status_code == 200:
             cotacao = float(resp.json()["rates"]["BRL"])
             return {
@@ -61,18 +61,18 @@ def consultar_euro():
                 "fonte": "ExchangeRate-API"
             }
     except Exception as e:
-        print(f"Aviso na 2ª fonte: {e}. Acionando 3ª fonte...")
+        print(f"Aviso na ExchangeRate-API: {e}. Tentando 3ª fonte...")
 
-    # 3ª Tentativa: Frankfurter API (Dados do Banco Central Europeu)
-    url_backup2 = "https://api.frankfurter.app/latest?from=EUR&to=BRL"
-    resp = requests.get(url_backup2, headers=headers, timeout=10)
+    # 3ª Opção: Frankfurter API (Banco Central Europeu)
+    url_bce = "https://api.frankfurter.app/latest?from=EUR&to=BRL"
+    resp = requests.get(url_bce, headers=headers, timeout=10)
     resp.raise_for_status()
     cotacao = float(resp.json()["rates"]["BRL"])
     return {
         "comercial": cotacao,
         "minima": cotacao,
         "variacao": 0.0,
-        "fonte": "Frankfurter (BCE)"
+        "fonte": "Banco Central Europeu"
     }
 
 def main():
@@ -85,7 +85,8 @@ def main():
     
     print(
         f"[{agora_br.strftime('%d/%m/%Y %H:%M')}] Fonte: {info['fonte']} | "
-        f"EUR Comercial: R$ {cotacao:.4f} | VET Estimado: R$ {custo_efetivo:.4f}"
+        f"EUR Comercial: R$ {cotacao:.4f} ({info['variacao']:+.2f}%) | "
+        f"VET Estimado: R$ {custo_efetivo:.4f}"
     )
 
     if cotacao <= PRECO_ALVO_COMERCIAL:
@@ -93,7 +94,8 @@ def main():
             f"🎯 *META DO EURO ATINGIDA!*\n\n"
             f"💶 *Euro Comercial:* R$ {cotacao:.4f}\n"
             f"💳 *VET Estimado (Revolut/Wise):* R$ {custo_efetivo:.4f}\n"
-            f"📉 *Mínima registrada:* R$ {info['minima']:.4f}\n"
+            f"📉 *Mínima do dia:* R$ {info['minima']:.4f}\n"
+            f"📈 *Variação:* {info['variacao']:+.2f}%\n"
             f"🌐 *Fonte:* {info['fonte']}\n"
             f"🕒 *Horário (BRT):* {agora_br.strftime('%H:%M')}"
         )
